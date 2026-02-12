@@ -20,26 +20,57 @@ import (
 func ChatCompletions(c *gin.Context) {
 	cfg := config.Get()
 
-	var req adapter.OAIRequest
 	body, _ := io.ReadAll(c.Request.Body)
-	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("[400] invalid request body: %v, body: %s", err, string(body[:min(len(body), 200)]))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
-		return
-	}
+	log.Printf("[DEBUG] ===== Raw Request =====\n%s", string(body))
 
-	targetModel, providers := proxy.ResolveModel(req.Model, cfg)
+	// 检测是否为 Anthropic 原生格式（有 system 顶层字段或 tools 里有 input_schema）
+	var probe struct {
+		Model  string          `json:"model"`
+		System json.RawMessage `json:"system"`
+	}
+	json.Unmarshal(body, &probe)
+
+	targetModel, providers := proxy.ResolveModel(probe.Model, cfg)
 	if targetModel == "" || len(providers) == 0 {
-		log.Printf("[400] no provider for model: %s", req.Model)
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("no provider for model %s", req.Model)})
+		log.Printf("[400] no provider for model: %s", probe.Model)
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("no provider for model %s", probe.Model)})
 		return
 	}
 
 	provider := proxy.WeightedSelect(providers)
-	log.Printf("[proxy] %s -> %s (provider: %s)", req.Model, targetModel, provider.ID)
+	log.Printf("[proxy] %s -> %s (provider: %s)", probe.Model, targetModel, provider.ID)
 	timeout := time.Duration(provider.Timeout) * time.Second
 	if timeout == 0 {
 		timeout = 300 * time.Second
+	}
+
+	isNativeAnthropic := provider.Type == "anthropic" && len(probe.System) > 0
+
+	if isNativeAnthropic {
+		// Cursor 发的就是 Anthropic 原生格式，直接透传，只替换 model
+		var raw map[string]json.RawMessage
+		json.Unmarshal(body, &raw)
+		modelJSON, _ := json.Marshal(targetModel)
+		raw["model"] = modelJSON
+		// 确保 max_tokens 足够
+		var maxTokens int
+		if mt, ok := raw["max_tokens"]; ok {
+			json.Unmarshal(mt, &maxTokens)
+		}
+		if maxTokens < 8192 {
+			raw["max_tokens"], _ = json.Marshal(8192)
+		}
+		newBody, _ := json.Marshal(raw)
+		log.Printf("[DEBUG] ===== Anthropic Passthrough Request =====\n%s", string(newBody))
+		proxy.ProxyAnthropicRaw(c.Writer, c.Request, newBody, provider, probe.Model, timeout)
+		return
+	}
+
+	var req adapter.OAIRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		log.Printf("[400] invalid request body: %v, body: %s", err, string(body[:min(len(body), 200)]))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
 	}
 
 	switch provider.Type {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand/v2"
 	"net/http"
 	"path"
@@ -71,6 +72,8 @@ func ProxyAnthropic(w http.ResponseWriter, r *http.Request, req adapter.OAIReque
 	ar := adapter.OpenaiToAnthropic(req, model)
 	arBody, _ := json.Marshal(ar)
 
+	log.Printf("[DEBUG] ===== Anthropic Request =====\n%s", indentJSON(arBody))
+
 	client := &http.Client{Timeout: timeout}
 	url := strings.TrimRight(p.BaseURL, "/") + "/v1/messages"
 	httpReq, _ := http.NewRequestWithContext(r.Context(), "POST", url, bytes.NewReader(arBody))
@@ -80,29 +83,84 @@ func ProxyAnthropic(w http.ResponseWriter, r *http.Request, req adapter.OAIReque
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
+		log.Printf("[DEBUG] Anthropic request error: %v", err)
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 
+	log.Printf("[DEBUG] Anthropic response status: %d", resp.StatusCode)
+
 	if resp.StatusCode != 200 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[DEBUG] ===== Anthropic Error Response =====\n%s", string(respBody))
+		w.Write(respBody)
 		return
 	}
 
 	if req.Stream {
 		StreamAnthropicToOpenAI(w, resp.Body, req.Model)
 	} else {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[DEBUG] ===== Anthropic Response =====\n%s", indentJSON(respBody))
 		var ar adapter.AnthropicResponse
-		if err := json.NewDecoder(resp.Body).Decode(&ar); err != nil {
+		if err := json.Unmarshal(respBody, &ar); err != nil {
 			http.Error(w, `{"error":"decode error"}`, http.StatusBadGateway)
 			return
 		}
 		oai := adapter.AnthropicToOpenai(ar, req.Model)
+		oaiBody, _ := json.Marshal(oai)
+		log.Printf("[DEBUG] ===== OAI Response =====\n%s", indentJSON(oaiBody))
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(oai)
+		w.Write(oaiBody)
+	}
+}
+
+func ProxyAnthropicRaw(w http.ResponseWriter, r *http.Request, body []byte, p config.Provider, originalModel string, timeout time.Duration) {
+	client := &http.Client{Timeout: timeout}
+	url := strings.TrimRight(p.BaseURL, "/") + "/v1/messages"
+	httpReq, _ := http.NewRequestWithContext(r.Context(), "POST", url, bytes.NewReader(body))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-api-key", p.APIKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		log.Printf("[DEBUG] Anthropic request error: %v", err)
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Printf("[DEBUG] Anthropic response status: %d", resp.StatusCode)
+
+	if resp.StatusCode != 200 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[DEBUG] ===== Anthropic Error Response =====\n%s", string(respBody))
+		w.Write(respBody)
+		return
+	}
+
+	// 响应需要转换为 OpenAI 格式，因为请求来自 /v1/chat/completions
+	isStream := strings.Contains(resp.Header.Get("Content-Type"), "event-stream")
+	if isStream {
+		StreamAnthropicToOpenAI(w, resp.Body, originalModel)
+	} else {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[DEBUG] ===== Anthropic Raw Response =====\n%s", string(respBody))
+		var ar adapter.AnthropicResponse
+		if err := json.Unmarshal(respBody, &ar); err != nil {
+			http.Error(w, `{"error":"decode error"}`, http.StatusBadGateway)
+			return
+		}
+		oai := adapter.AnthropicToOpenai(ar, originalModel)
+		oaiBody, _ := json.Marshal(oai)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(oaiBody)
 	}
 }
 
@@ -135,14 +193,30 @@ func StreamAnthropicToOpenAI(w http.ResponseWriter, body io.Reader, model string
 			continue
 		}
 		data := strings.TrimPrefix(line, "data: ")
+		log.Printf("[DEBUG] [SSE] event=%s data=%s", currentEvent, data)
 		chunks := adapter.AnthropicStreamEventToChunks(currentEvent, json.RawMessage(data), state, model)
 		for _, chunk := range chunks {
-			fmt.Fprint(w, adapter.FormatSSEChunk(chunk))
+			sse := adapter.FormatSSEChunk(chunk)
+			log.Printf("[DEBUG] [SSE->OAI] %s", strings.TrimSpace(sse))
+			fmt.Fprint(w, sse)
 			flusher.Flush()
 		}
 	}
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+func mustMarshal(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+func indentJSON(data []byte) string {
+	var buf bytes.Buffer
+	if json.Indent(&buf, data, "", "  ") == nil {
+		return buf.String()
+	}
+	return string(data)
 }
 
 func ProxyOpenAI(w http.ResponseWriter, r *http.Request, body []byte, req adapter.OAIRequest, p config.Provider, model string, timeout time.Duration) {

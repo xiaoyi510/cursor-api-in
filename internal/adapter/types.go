@@ -5,15 +5,16 @@ import "encoding/json"
 // --- OpenAI Types ---
 
 type OAIRequest struct {
-	Model      string          `json:"model"`
-	Messages   []OAIMessage    `json:"messages"`
-	MaxTokens  *int            `json:"max_tokens,omitempty"`
-	Temperature *float64       `json:"temperature,omitempty"`
-	TopP       *float64        `json:"top_p,omitempty"`
-	Stream     bool            `json:"stream"`
-	Tools      []OAITool       `json:"tools,omitempty"`
-	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
-	Stop       json.RawMessage `json:"stop,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []OAIMessage    `json:"messages"`
+	MaxTokens   *int            `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
+	Stream      bool            `json:"stream"`
+	Tools       []OAITool       `json:"tools,omitempty"`
+	ToolChoice  json.RawMessage `json:"tool_choice,omitempty"`
+	Stop        json.RawMessage `json:"stop,omitempty"`
+	System      json.RawMessage `json:"system,omitempty"`
 }
 
 type OAIMessage struct {
@@ -39,6 +40,30 @@ type OAIFunctionCall struct {
 type OAITool struct {
 	Type     string      `json:"type"`
 	Function OAIFunction `json:"function"`
+}
+
+func (t *OAITool) UnmarshalJSON(data []byte) error {
+	// 先尝试标准 OpenAI 格式: {"type":"function","function":{...}}
+	type plain OAITool
+	if err := json.Unmarshal(data, (*plain)(t)); err == nil && t.Function.Name != "" {
+		return nil
+	}
+	// Cursor 扁平格式: {"name":"...","description":"...","input_schema":{...}}
+	var flat struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		InputSchema json.RawMessage `json:"input_schema"`
+	}
+	if err := json.Unmarshal(data, &flat); err != nil {
+		return err
+	}
+	t.Type = "function"
+	t.Function = OAIFunction{
+		Name:        flat.Name,
+		Description: flat.Description,
+		Parameters:  flat.InputSchema,
+	}
+	return nil
 }
 
 type OAIFunction struct {

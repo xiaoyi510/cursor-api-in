@@ -1,0 +1,6 @@
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY server .
+EXPOSE 3029
+CMD ["./server"]
