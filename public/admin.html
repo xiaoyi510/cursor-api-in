@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Proxy 控制台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div id="login-overlay" class="login-overlay" style="display:none">
+  <div class="login-box">
+    <h2 style="font-family:var(--mono);color:var(--accent);margin-bottom:16px">API Proxy 控制台</h2>
+    <div class="field"><label>管理密码</label><input id="login-password" type="password" placeholder="请输入管理密码" onkeydown="if(event.key==='Enter')login()"></div>
+    <div id="login-error" style="color:var(--red);font-size:12px;margin-bottom:8px;display:none"></div>
+    <button class="btn btn-accent" onclick="login()" style="width:100%">登录</button>
+  </div>
+</div>
+
+<div class="header">
+  <div class="dot"></div>
+  <h1>API Proxy 控制台</h1>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('overview')">概览</div>
+  <div class="tab" onclick="switchTab('providers')">服务商</div>
+  <div class="tab" onclick="switchTab('settings')">设置</div>
+</div>
+
+<div class="content">
+  <div id="panel-overview" class="panel active">
+    <div class="stats">
+      <div class="stat"><div class="label">服务商</div><div class="value" id="s-providers">0</div></div>
+      <div class="stat"><div class="label">模型总数</div><div class="value" id="s-models">0</div></div>
+      <div class="stat"><div class="label">监听端口</div><div class="value" id="s-port">-</div></div>
+      <div class="stat"><div class="label">鉴权</div><div class="value" id="s-auth">-</div></div>
+    </div>
+    <h3 style="font-size:13px;color:var(--text2);margin-bottom:12px;font-family:var(--mono)">服务商 & 模型</h3>
+    <table><thead><tr><th>ID</th><th>名称</th><th>类型</th><th>模型映射</th><th>权重</th></tr></thead><tbody id="overview-table"></tbody></table>
+  </div>
+
+  <div id="panel-providers" class="panel">
+    <div class="toolbar">
+      <span style="color:var(--text2);font-size:13px">管理 API 服务商及其模型</span>
+      <button class="btn btn-accent" onclick="openProviderModal()">+ 添加服务商</button>
+    </div>
+    <table><thead><tr><th>ID</th><th>名称</th><th>类型</th><th>地址</th><th>模型</th><th>权重</th><th>操作</th></tr></thead><tbody id="providers-table"></tbody></table>
+  </div>
+
+  <div id="panel-settings" class="panel">
+    <div style="max-width:400px">
+      <div class="field"><label>监听端口</label><input id="set-port" type="number"></div>
+      <div class="field"><label>访问密钥 (留空=不鉴权)</label><input id="set-key" type="text" placeholder="可选"></div>
+      <div class="field"><label>管理密码 (留空=无需密码)</label><input id="set-admin-pwd" type="password" placeholder="可选"></div>
+      <button class="btn btn-accent" onclick="saveSettings()" style="margin-top:8px">保存设置</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="provider-modal">
+  <div class="modal">
+    <h3 id="provider-modal-title">添加服务商</h3>
+    <input type="hidden" id="p-edit-idx">
+    <div class="field-row">
+      <div class="field"><label>ID</label><input id="p-id" placeholder="claude-main"></div>
+      <div class="field"><label>名称</label><input id="p-name" placeholder="Claude 主线"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>类型</label><select id="p-type"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select></div>
+      <div class="field"><label>权重</label><input id="p-weight" type="number" value="1" min="0"><div class="hint">0 = 禁用</div></div>
+    </div>
+    <div class="field"><label>Base URL</label><input id="p-url" placeholder="https://api.anthropic.com"></div>
+    <div class="field"><label>API Key</label><input id="p-key" type="password" placeholder="sk-..."></div>
+    <div class="field"><label>超时 (秒)</label><input id="p-timeout" type="number" value="300"></div>
+    <div class="field">
+      <label>模型映射 <span style="font-weight:400;text-transform:none">(请求名 → 实际名)</span></label>
+      <div id="p-models" class="model-list"></div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-sm" onclick="addModelRow()">+ 手动添加</button>
+        <button class="btn btn-sm" onclick="fetchModels()">获取模型列表</button>
+      </div>
+      <div id="p-model-picker"></div>
+    </div>
+    <div id="p-test-result"></div>
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+      <button class="btn" onclick="testProvider()">测试连接</button>
+      <button class="btn" onclick="closeModal('provider-modal')">取消</button>
+      <button class="btn btn-accent" onclick="saveProvider()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="test-model-modal">
+  <div class="modal" style="max-width:420px">
+    <h3>测试模型</h3>
+    <input type="hidden" id="tm-provider-idx">
+    <div class="field"><label>选择模型</label><select id="tm-model-select"></select></div>
+    <div id="tm-result"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+      <button class="btn" onclick="closeModal('test-model-modal')">关闭</button>
+      <button class="btn btn-accent" id="tm-run-btn" onclick="runTestModel()">开始测试</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

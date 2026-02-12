@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  api-proxy:
+    image: registry.cn-chengdu.aliyuncs.com/xarr/xarr-cursor-api-2-claude:latest
+    ports:
+      - "${PORT:-3029}:3029"
+    volumes:
+      - ./config.json:/app/config.json
+    restart: unless-stopped
