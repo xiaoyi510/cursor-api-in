@@ -2,6 +2,16 @@
 
 OpenAI 格式 API 代理，支持将请求转发到 Anthropic Claude 等多个后端，内置 Web 控制台可视化配置。
 
+> **⚠️ 重要：本服务必须部署在公网可访问的服务器上。**
+>
+> Cursor 的自定义 OpenAI Base URL 功能，请求是从 Cursor 官方服务器发出的，而不是从你的本地电脑发出。因此本服务必须部署在有公网 IP 的服务器上（如云服务器），不能部署在内网或本地局域网中，否则 Cursor 无法访问。
+
+## 工作原理
+
+```
+Cursor 客户端 → Cursor 服务器 → 你的公网服务器（本服务） → Anthropic / OpenAI API
+```
+
 ## 特性
 
 - **多 Provider 支持** — Anthropic、OpenAI 等多个后端，独立配置
@@ -101,10 +111,12 @@ make push TAG=v1.0  # 指定 tag
 
 ## 使用示例
 
-配置 Cursor / 其他客户端的 API 地址为：
+在 Cursor 中配置自定义 OpenAI Base URL：
 
 ```
-http://your-server:3029/v1
+https://your-public-domain.com/v1
 ```
+
+> 必须使用公网可访问的域名或 IP，建议配合 Nginx 反向代理并启用 HTTPS。
 
 设置 API Key 为配置中的 `api_key` 值即可。
