@@ -53,6 +53,29 @@ func OpenaiToAnthropic(req OAIRequest, model string) AnthropicRequest {
 		})
 	}
 
+	if len(req.ToolChoice) > 0 && len(ar.Tools) > 0 {
+		var s string
+		if json.Unmarshal(req.ToolChoice, &s) == nil {
+			switch s {
+			case "auto":
+				ar.ToolChoice, _ = json.Marshal(map[string]string{"type": "auto"})
+			case "required":
+				ar.ToolChoice, _ = json.Marshal(map[string]string{"type": "any"})
+			case "none":
+				ar.Tools = nil
+			}
+		} else {
+			var obj struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			}
+			if json.Unmarshal(req.ToolChoice, &obj) == nil && obj.Function.Name != "" {
+				ar.ToolChoice, _ = json.Marshal(map[string]string{"type": "tool", "name": obj.Function.Name})
+			}
+		}
+	}
+
 	var msgs []AnthropicMsg
 	for _, m := range req.Messages {
 		if m.Role == "system" {
@@ -126,6 +149,7 @@ func MapStopReason(reason string) string {
 
 func AnthropicToOpenai(resp AnthropicResponse, model string) OAIResponse {
 	msg := OAIMsg{Role: "assistant"}
+	toolIdx := 0
 	for _, block := range resp.Content {
 		switch block.Type {
 		case "text":
@@ -135,13 +159,15 @@ func AnthropicToOpenai(resp AnthropicResponse, model string) OAIResponse {
 		case "tool_use":
 			inputStr, _ := json.Marshal(block.Input)
 			msg.ToolCalls = append(msg.ToolCalls, OAIToolCall{
-				ID:   block.ID,
-				Type: "function",
+				Index: toolIdx,
+				ID:    block.ID,
+				Type:  "function",
 				Function: OAIFunctionCall{
 					Name:      block.Name,
 					Arguments: string(inputStr),
 				},
 			})
+			toolIdx++
 		}
 	}
 
@@ -192,6 +218,7 @@ func AnthropicStreamEventToChunks(eventType string, data json.RawMessage, state 
 			state.ToolName = block.ContentBlock.Name
 			state.ToolArgs = ""
 			tc := OAIToolCall{
+				Index:    state.ToolIndex,
 				ID:       state.ToolID,
 				Type:     "function",
 				Function: OAIFunctionCall{Name: state.ToolName, Arguments: ""},
@@ -219,6 +246,7 @@ func AnthropicStreamEventToChunks(eventType string, data json.RawMessage, state 
 		case "input_json_delta":
 			state.ToolArgs += d.Delta.PartialJSON
 			tc := OAIToolCall{
+				Index:    state.ToolIndex - 1,
 				ID:       state.ToolID,
 				Type:     "function",
 				Function: OAIFunctionCall{Name: state.ToolName, Arguments: d.Delta.PartialJSON},

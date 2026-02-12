@@ -5,14 +5,15 @@ import "encoding/json"
 // --- OpenAI Types ---
 
 type OAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []OAIMessage    `json:"messages"`
-	MaxTokens   *int            `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	TopP        *float64        `json:"top_p,omitempty"`
-	Stream      bool            `json:"stream"`
-	Tools       []OAITool       `json:"tools,omitempty"`
-	Stop        json.RawMessage `json:"stop,omitempty"`
+	Model      string          `json:"model"`
+	Messages   []OAIMessage    `json:"messages"`
+	MaxTokens  *int            `json:"max_tokens,omitempty"`
+	Temperature *float64       `json:"temperature,omitempty"`
+	TopP       *float64        `json:"top_p,omitempty"`
+	Stream     bool            `json:"stream"`
+	Tools      []OAITool       `json:"tools,omitempty"`
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	Stop       json.RawMessage `json:"stop,omitempty"`
 }
 
 type OAIMessage struct {
@@ -24,7 +25,8 @@ type OAIMessage struct {
 }
 
 type OAIToolCall struct {
-	ID       string          `json:"id"`
+	Index    int             `json:"index"`
+	ID       string          `json:"id,omitempty"`
 	Type     string          `json:"type"`
 	Function OAIFunctionCall `json:"function"`
 }
@@ -85,6 +87,7 @@ type AnthropicRequest struct {
 	TopP        *float64        `json:"top_p,omitempty"`
 	Stream      bool            `json:"stream"`
 	Tools       []AnthropicTool `json:"tools,omitempty"`
+	ToolChoice  json.RawMessage `json:"tool_choice,omitempty"`
 }
 
 type AnthropicMsg struct {
